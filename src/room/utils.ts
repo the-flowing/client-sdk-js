@@ -433,6 +433,7 @@ export function createAudioAnalyser(
   if (!audioContext) {
     throw new Error('Audio Context not supported on this browser');
   }
+
   const streamTrack = opts.cloneTrack ? track.mediaStreamTrack.clone() : track.mediaStreamTrack;
   const mediaStreamSource = audioContext.createMediaStreamSource(new MediaStream([streamTrack]));
   const analyser = audioContext.createAnalyser();
@@ -624,4 +625,29 @@ export function isLocalParticipant(p: Participant): p is LocalParticipant {
 
 export function isRemoteParticipant(p: Participant): p is RemoteParticipant {
   return !p.isLocal;
+}
+
+export function splitUtf8(s: string, n: number): Uint8Array[] {
+  if (n < 4) {
+    throw new Error('n must be at least 4 due to utf8 encoding rules');
+  }
+  // adapted from https://stackoverflow.com/a/6043797
+  const result: Uint8Array[] = [];
+  let encoded = new TextEncoder().encode(s);
+  while (encoded.length > n) {
+    let k = n;
+    while (k > 0) {
+      const byte = encoded[k];
+      if (byte !== undefined && (byte & 0xc0) !== 0x80) {
+        break;
+      }
+      k--;
+    }
+    result.push(encoded.slice(0, k));
+    encoded = encoded.slice(k);
+  }
+  if (encoded.length > 0) {
+    result.push(encoded);
+  }
+  return result;
 }

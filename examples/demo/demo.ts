@@ -10,11 +10,11 @@ import type {
   VideoCodec,
 } from '../../src/index';
 import {
+  BackupCodecPolicy,
   ConnectionQuality,
   ConnectionState,
   DisconnectReason,
   ExternalE2EEKeyProvider,
-  LocalAudioTrack,
   LogLevel,
   MediaDeviceFailure,
   Participant,
@@ -81,7 +81,7 @@ const appActions = {
     const file = ($('file') as HTMLInputElement).files?.[0]!;
     currentRoom?.localParticipant.sendFile(file, {
       mimeType: file.type,
-      topic: 'welcome',
+      topic: 'files',
       onProgress: (progress) => console.log('sending file, progress', Math.ceil(progress * 100)),
     });
   },
@@ -99,6 +99,10 @@ const appActions = {
     const autoSubscribe = (<HTMLInputElement>$('auto-subscribe')).checked;
     const e2eeEnabled = (<HTMLInputElement>$('e2ee')).checked;
     const audioOutputId = (<HTMLSelectElement>$('audio-output')).value;
+    let backupCodecPolicy: BackupCodecPolicy | undefined;
+    if ((<HTMLInputElement>$('multicodec-simulcast')).checked) {
+      backupCodecPolicy = BackupCodecPolicy.Simulcast;
+    }
 
     updateSearchParams(url, token, cryptoKey);
 
@@ -117,6 +121,7 @@ const appActions = {
         forceStereo: false,
         screenShareEncoding: ScreenSharePresets.h1080fps30.encoding,
         scalabilityMode: 'L3T3_KEY',
+        backupCodecPolicy: backupCodecPolicy,
       },
       videoCaptureDefaults: {
         resolution: VideoPresets.h720.resolution,
@@ -247,7 +252,7 @@ const appActions = {
         );
       });
 
-    room.setTextStreamHandler(async (reader, participant) => {
+    room.registerTextStreamHandler('chat', async (reader, participant) => {
       const info = reader.info;
       if (info.size) {
         handleChatMessage(
@@ -259,37 +264,87 @@ const appActions = {
           room.getParticipantByIdentity(participant?.identity),
         );
       } else {
-        for await (const msg of reader) {
-          handleChatMessage(
-            {
-              id: info.id,
-              timestamp: info.timestamp,
-              message: msg.collected,
-            },
-            room.getParticipantByIdentity(participant?.identity),
-          );
-        }
+        handleChatMessage(
+          {
+            id: info.id,
+            timestamp: info.timestamp,
+            message: await reader.readAll(),
+          },
+          room.getParticipantByIdentity(participant?.identity),
+        );
+
         appendLog('text stream finished');
       }
       console.log('final info including close extensions', reader.info);
-    }, 'chat');
+    });
 
-    room.setByteStreamHandler(async (reader, participant) => {
+    room.registerByteStreamHandler('files', async (reader, participant) => {
       const info = reader.info;
 
       appendLog(`started to receive a file called "${info.name}" from ${participant?.identity}`);
+
+      const progressContainer = document.createElement('div');
+      progressContainer.style.margin = '10px 0';
+      const progressLabel = document.createElement('div');
+      progressLabel.innerText = `Receiving "${info.name}" from ${participant?.identity}...`;
+      const progressBar = document.createElement('progress');
+      progressBar.max = 100;
+      progressBar.value = 0;
+      progressBar.style.width = '100%';
+
+      progressContainer.appendChild(progressLabel);
+      progressContainer.appendChild(progressBar);
+      $('chat-area').after(progressContainer);
+
+      appendLog(`Started receiving file "${info.name}" from ${participant?.identity}`);
+
       reader.onProgress = (progress) => {
         console.log(`"progress ${progress ? (progress * 100).toFixed(0) : 'undefined'}%`);
+
+        if (progress) {
+          progressBar.value = progress * 100;
+          progressLabel.innerText = `Receiving "${info.name}" from ${participant?.identity} (${(progress * 100).toFixed(0)}%)`;
+        }
       };
+
       const result = new Blob(await reader.readAll(), { type: info.mimeType });
-      appendLog(`completely received file called "${info.name}" from ${participant?.identity}`);
-      const downloadLink = URL.createObjectURL(result);
-      const linkEl = document.createElement('a');
-      linkEl.href = downloadLink;
-      linkEl.innerText = info.name;
-      linkEl.setAttribute('download', info.name);
-      document.body.append(linkEl);
-    }, 'welcome');
+      appendLog(`Completely received file "${info.name}" from ${participant?.identity}`);
+
+      progressContainer.remove();
+
+      if (info.mimeType.startsWith('image/')) {
+        // Embed images directly in HTML
+        const imgContainer = document.createElement('div');
+        imgContainer.style.margin = '10px 0';
+        imgContainer.style.padding = '10px';
+
+        const img = document.createElement('img');
+        img.style.maxWidth = '300px';
+        img.style.maxHeight = '300px';
+        img.src = URL.createObjectURL(result);
+
+        const downloadLink = document.createElement('a');
+        downloadLink.href = img.src;
+        downloadLink.innerText = `Download ${info.name}`;
+        downloadLink.setAttribute('download', info.name);
+        downloadLink.style.display = 'block';
+        downloadLink.style.marginTop = '5px';
+
+        imgContainer.appendChild(img);
+        imgContainer.appendChild(downloadLink);
+        $('chat-area').after(imgContainer);
+      } else {
+        // Non-images get a text download link instead
+        const downloadLink = document.createElement('a');
+        downloadLink.href = URL.createObjectURL(result);
+        downloadLink.innerText = `Download ${info.name}`;
+        downloadLink.setAttribute('download', info.name);
+        downloadLink.style.margin = '10px';
+        downloadLink.style.padding = '5px';
+        downloadLink.style.display = 'block';
+        $('chat-area').after(downloadLink);
+      }
+    });
 
     try {
       // read and set current key from input
@@ -459,7 +514,7 @@ const appActions = {
     if (!currentRoom) return;
     const textField = <HTMLInputElement>$('entry');
     if (textField.value) {
-      currentRoom.localParticipant.sendText(textField.value, { topic: 'chat' });
+      currentRoom.localParticipant.sendText(textField.value, { topic: 'lk.chat' });
       textField.value = '';
     }
   },
@@ -563,7 +618,7 @@ async function sendGreetingTo(participant: Participant) {
   const greeting = `Hello new participant ${participant.identity}. This is just an progressively updating chat message from me, participant ${currentRoom?.localParticipant.identity}.`;
 
   const streamWriter = await currentRoom!.localParticipant.streamText({
-    topic: 'chat',
+    topic: 'lk.chat',
     destinationIdentities: [participant.identity],
   });
 

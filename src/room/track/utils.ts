@@ -1,4 +1,4 @@
-import { TrackPublishedResponse } from '@livekit/protocol';
+import { TrackPublishedResponse, TrackSource } from '@livekit/protocol';
 import type { AudioProcessorOptions, TrackProcessor, VideoProcessorOptions } from '../..';
 import { cloneDeep } from '../../utils/cloneDeep';
 import { isSafari, sleep } from '../utils';
@@ -21,6 +21,8 @@ export function mergeDefaultOptions(
   const { optionsWithoutProcessor, audioProcessor, videoProcessor } = extractProcessorsFromOptions(
     options ?? {},
   );
+  const defaultAudioProcessor = audioDefaults?.processor;
+  const defaultVideoProcessor = videoDefaults?.processor;
   const clonedOptions: CreateLocalTracksOptions = cloneDeep(optionsWithoutProcessor) ?? {};
   if (clonedOptions.audio === true) clonedOptions.audio = {};
   if (clonedOptions.video === true) clonedOptions.video = {};
@@ -32,8 +34,8 @@ export function mergeDefaultOptions(
       audioDefaults as Record<string, unknown>,
     );
     clonedOptions.audio.deviceId ??= 'default';
-    if (audioProcessor) {
-      clonedOptions.audio.processor = audioProcessor;
+    if (audioProcessor || defaultAudioProcessor) {
+      clonedOptions.audio.processor = audioProcessor ?? defaultAudioProcessor;
     }
   }
   if (clonedOptions.video) {
@@ -42,8 +44,8 @@ export function mergeDefaultOptions(
       videoDefaults as Record<string, unknown>,
     );
     clonedOptions.video.deviceId ??= 'default';
-    if (videoProcessor) {
-      clonedOptions.video.processor = videoProcessor;
+    if (videoProcessor || defaultVideoProcessor) {
+      clonedOptions.video.processor = videoProcessor ?? defaultVideoProcessor;
     }
   }
   return clonedOptions;
@@ -131,7 +133,27 @@ export function getNewAudioContext(): AudioContext | void {
     // @ts-ignore
     typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext);
   if (AudioContext) {
-    return new AudioContext({ latencyHint: 'interactive' });
+    const audioContext = new AudioContext({ latencyHint: 'interactive' });
+    // If the audio context is suspended, we need to resume it when the user clicks on the page
+    if (
+      audioContext.state === 'suspended' &&
+      typeof window !== 'undefined' &&
+      window.document?.body
+    ) {
+      const handleResume = async () => {
+        try {
+          if (audioContext.state === 'suspended') {
+            await audioContext.resume();
+          }
+        } catch (e) {
+          console.warn('Error trying to auto-resume audio context', e);
+        }
+
+        window.document.body?.removeEventListener('click', handleResume);
+      };
+      window.document.body.addEventListener('click', handleResume);
+    }
+    return audioContext;
   }
 }
 
@@ -291,4 +313,19 @@ export function extractProcessorsFromOptions(options: CreateLocalTracksOptions) 
   }
 
   return { audioProcessor, videoProcessor, optionsWithoutProcessor: newOptions };
+}
+
+export function getTrackSourceFromProto(source: TrackSource): Track.Source {
+  switch (source) {
+    case TrackSource.CAMERA:
+      return Track.Source.Camera;
+    case TrackSource.MICROPHONE:
+      return Track.Source.Microphone;
+    case TrackSource.SCREEN_SHARE:
+      return Track.Source.ScreenShare;
+    case TrackSource.SCREEN_SHARE_AUDIO:
+      return Track.Source.ScreenShareAudio;
+    default:
+      return Track.Source.Unknown;
+  }
 }

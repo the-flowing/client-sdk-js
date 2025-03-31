@@ -20,6 +20,19 @@ export interface SendTextOptions {
   destinationIdentities?: Array<string>;
   attachments?: Array<File>;
   onProgress?: (progress: number) => void;
+  attributes?: Record<string, string>;
+}
+
+export interface StreamTextOptions {
+  topic?: string;
+  destinationIdentities?: Array<string>;
+  type?: 'create' | 'update';
+  streamId?: string;
+  version?: number;
+  attachedStreamIds?: Array<string>;
+  replyToStreamId?: string;
+  totalSize?: number;
+  attributes?: Record<string, string>;
 }
 
 export type DataPublishOptions = {
@@ -108,9 +121,3 @@ export interface ByteStreamInfo extends BaseStreamInfo {
 }
 
 export interface TextStreamInfo extends BaseStreamInfo {}
-
-export type TextStreamChunk = {
-  index: number;
-  current: string;
-  collected: string;
-};

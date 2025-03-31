@@ -258,13 +258,17 @@ export class SignalClient {
     abortSignal?: AbortSignal,
   ): Promise<JoinResponse | ReconnectResponse | undefined> {
     this.connectOptions = opts;
-    url = toWebsocketUrl(url);
+    const urlObj = new URL(toWebsocketUrl(url));
     // strip trailing slash
-    url = url.replace(/\/$/, '');
-    url += '/rtc';
+    const hasTrailingSlash = urlObj.pathname.endsWith('/');
+    urlObj.pathname += hasTrailingSlash ? 'rtc' : '/rtc';
 
     const clientInfo = getClientInfo();
     const params = createConnectionParams(token, clientInfo, opts);
+
+    for (const [key, value] of params) {
+      urlObj.searchParams.set(key, value);
+    }
 
     return new Promise<JoinResponse | ReconnectResponse | undefined>(async (resolve, reject) => {
       const unlock = await this.connectionLock.lock();
@@ -294,11 +298,19 @@ export class SignalClient {
           abortHandler();
         }
         abortSignal?.addEventListener('abort', abortHandler);
-        this.log.debug(`connecting to ${url + params}`, this.logContext);
+        const redactedUrl = new URL(urlObj.toString());
+        if (redactedUrl.searchParams.has('access_token')) {
+          redactedUrl.searchParams.set('access_token', '<redacted>');
+        }
+        this.log.debug(`connecting to ${redactedUrl}`, {
+          reconnect: opts.reconnect,
+          reconnectReason: opts.reconnectReason,
+          ...this.logContext,
+        });
         if (this.ws) {
           await this.close(false);
         }
-        this.ws = new WebSocket(url + params);
+        this.ws = new WebSocket(urlObj.toString());
         this.ws.binaryType = 'arraybuffer';
 
         this.ws.onopen = () => {
@@ -310,7 +322,10 @@ export class SignalClient {
             this.state = SignalConnectionState.DISCONNECTED;
             clearTimeout(wsTimeout);
             try {
-              const resp = await fetch(`http${url.substring(2)}/validate${params}`, {
+              const validateURL = new URL(urlObj.toString());
+              validateURL.protocol = `http${validateURL.protocol.substring(2)}`;
+              validateURL.pathname += '/validate';
+              const resp = await fetch(validateURL, {
                 credentials: 'include', mode: 'no-cors'
               });
               if (resp.status.toFixed(0).startsWith('4')) {
@@ -328,7 +343,7 @@ export class SignalClient {
             } catch (e) {
               reject(
                 new ConnectionError(
-                  'server was not reachable',
+                  e instanceof Error ? e.message : 'server was not reachable',
                   ConnectionErrorReason.ServerUnreachable,
                 ),
               );
@@ -517,7 +532,7 @@ export class SignalClient {
   }
 
   sendIceCandidate(candidate: RTCIceCandidateInit, target: SignalTarget) {
-    this.log.trace('sending ice candidate', { ...this.logContext, candidate });
+    this.log.debug('sending ice candidate', { ...this.logContext, candidate });
     return this.sendRequest({
       case: 'trickle',
       value: new TrickleRequest({
@@ -882,7 +897,11 @@ export function toProtoSessionDescription(
   return sd;
 }
 
-function createConnectionParams(token: string, info: ClientInfo, opts: ConnectOpts): string {
+function createConnectionParams(
+  token: string,
+  info: ClientInfo,
+  opts: ConnectOpts,
+): URLSearchParams {
   const params = new URLSearchParams();
   params.set('access_token', token);
 
@@ -930,5 +949,5 @@ function createConnectionParams(token: string, info: ClientInfo, opts: ConnectOp
     params.set('network', navigator.connection.type);
   }
 
-  return `?${params.toString()}`;
+  return params;
 }

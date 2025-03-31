@@ -1,5 +1,114 @@
 # Change Log
 
+## 2.9.9
+
+### Patch Changes
+
+- Fix trailing slash handling in WebSocket URL pathname - [#1440](https://github.com/livekit/client-sdk-js/pull/1440) ([@Tanney-102](https://github.com/Tanney-102))
+
+- Skip incoming track if it's ended - [#1438](https://github.com/livekit/client-sdk-js/pull/1438) ([@lukasIO](https://github.com/lukasIO))
+
+- Ensure only suspended audio context gets resumed - [#1452](https://github.com/livekit/client-sdk-js/pull/1452) ([@lukasIO](https://github.com/lukasIO))
+
+- Do not log transcription received events - [#1453](https://github.com/livekit/client-sdk-js/pull/1453) ([@lukasIO](https://github.com/lukasIO))
+
+## 2.9.8
+
+### Patch Changes
+
+- Use string instead of passing url object to WebSocket constructor - [#1443](https://github.com/livekit/client-sdk-js/pull/1443) ([@davidliu](https://github.com/davidliu))
+
+## 2.9.7
+
+### Patch Changes
+
+- Add attributes to SendTextOptions - [#1441](https://github.com/livekit/client-sdk-js/pull/1441) ([@lukasIO](https://github.com/lukasIO))
+
+## 2.9.6
+
+### Patch Changes
+
+- Automatically attempt to resume suspended audio contexts on click - [#1431](https://github.com/livekit/client-sdk-js/pull/1431) ([@lukasIO](https://github.com/lukasIO))
+
+- Fix ignored constraints in LocalTrack.restart - [#1435](https://github.com/livekit/client-sdk-js/pull/1435) ([@rktguswjd](https://github.com/rktguswjd))
+
+- log ice candidates as debug rather than trace - [#1437](https://github.com/livekit/client-sdk-js/pull/1437) ([@haydenbr](https://github.com/haydenbr))
+
+- fix: handle server url with params correctly - [#1366](https://github.com/livekit/client-sdk-js/pull/1366) ([@jiyeyuran](https://github.com/jiyeyuran))
+
+## 2.9.5
+
+### Patch Changes
+
+- fix: properly remove text stream controllers on stream close - [#1422](https://github.com/livekit/client-sdk-js/pull/1422) ([@lukasIO](https://github.com/lukasIO))
+
+- Reject publishing with insufficient permissions present - [#1418](https://github.com/livekit/client-sdk-js/pull/1418) ([@lukasIO](https://github.com/lukasIO))
+
+## 2.9.4
+
+### Patch Changes
+
+- Improve utf8 text split and add unit test - [#1414](https://github.com/livekit/client-sdk-js/pull/1414) ([@lukasIO](https://github.com/lukasIO))
+
+- Fix applying default processors from captureDefaults - [#1416](https://github.com/livekit/client-sdk-js/pull/1416) ([@lukasIO](https://github.com/lukasIO))
+
+## 2.9.3
+
+### Patch Changes
+
+- Fix utf8 text split iteration - [#1412](https://github.com/livekit/client-sdk-js/pull/1412) ([@lukasIO](https://github.com/lukasIO))
+
+## 2.9.2
+
+### Patch Changes
+
+- Add auto chunking to text streams - [#1410](https://github.com/livekit/client-sdk-js/pull/1410) ([@lukasIO](https://github.com/lukasIO))
+
+- Disable simulcast for screenshare backup codec - [#1409](https://github.com/livekit/client-sdk-js/pull/1409) ([@cnderrauber](https://github.com/cnderrauber))
+
+- added new connection tests - [#1402](https://github.com/livekit/client-sdk-js/pull/1402) ([@davidzhao](https://github.com/davidzhao))
+
+## 2.9.1
+
+### Patch Changes
+
+- Fix correct typing on async iterator stream readers - [#1401](https://github.com/livekit/client-sdk-js/pull/1401) ([@lukasIO](https://github.com/lukasIO))
+
+## 2.9.0
+
+### Minor Changes
+
+- Add backupCodecPolicy to TrackPublishDefaults - [#1399](https://github.com/livekit/client-sdk-js/pull/1399) ([@cnderrauber](https://github.com/cnderrauber))
+
+  The default policy of backup codec is `codec regression` for maxium compatibility, which means the publisher stops sending primary codec and all subscribers will receive backup codec even primary codec is supported.
+  It changes the default behavior `multi-codec simulcast` in the previous version, will not break the functionality of the previous version but only cause potential extra bandwidth usage. The user can set the policy to `multi-codec simulcast` to keep the previous behavior.
+
+- Add DataStream support - [#1301](https://github.com/livekit/client-sdk-js/pull/1301) ([@lukasIO](https://github.com/lukasIO))
+
+- Move RPC registration to room level and deprecate localParticipant level registration - [#1396](https://github.com/livekit/client-sdk-js/pull/1396) ([@lukasIO](https://github.com/lukasIO))
+
+- Populate name property of LiveKit errors and add reasonName for enums - [#1385](https://github.com/livekit/client-sdk-js/pull/1385) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- Replace internal instanceof checks with typeguards - [#1378](https://github.com/livekit/client-sdk-js/pull/1378) ([@lukasIO](https://github.com/lukasIO))
+
+- Remove track from pending publishing on device errors - [#1380](https://github.com/livekit/client-sdk-js/pull/1380) ([@lukasIO](https://github.com/lukasIO))
+
+- Refine room event argument logs - [#1382](https://github.com/livekit/client-sdk-js/pull/1382) ([@lukasIO](https://github.com/lukasIO))
+
+- Allow audio processing for react native without AudioContext - [#1395](https://github.com/livekit/client-sdk-js/pull/1395) ([@davidliu](https://github.com/davidliu))
+
+- use a error code 14 for data publish errors - [#1374](https://github.com/livekit/client-sdk-js/pull/1374) ([@davidzhao](https://github.com/davidzhao))
+
+- Export TrackType from @livekit/protocol - [#1370](https://github.com/livekit/client-sdk-js/pull/1370) ([@Philzen](https://github.com/Philzen))
+
+- Only emit TrackSubscriptionEvent once on room - [#1392](https://github.com/livekit/client-sdk-js/pull/1392) ([@lukasIO](https://github.com/lukasIO))
+
+- Redact access_token parameter in debug logs - [#1394](https://github.com/livekit/client-sdk-js/pull/1394) ([@hughns](https://github.com/hughns))
+
+- Don't hang on audio context trying to resume - [#1379](https://github.com/livekit/client-sdk-js/pull/1379) ([@lukasIO](https://github.com/lukasIO))
+
 ## 2.8.1
 
 ### Patch Changes

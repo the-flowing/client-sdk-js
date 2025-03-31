@@ -61,6 +61,8 @@ export { facingModeFromDeviceLabel, facingModeFromLocalTrack } from './room/trac
 export * from './room/track/options';
 export * from './room/track/processor/types';
 export * from './room/track/types';
+export type * from './room/StreamReader';
+export type * from './room/StreamWriter';
 export type {
   DataPublishOptions,
   SimulationScenario,
@@ -93,6 +95,7 @@ export {
   Room,
   SubscriptionError,
   TrackPublication,
+  TrackType,
   compareVersions,
   createAudioAnalyser,
   getBrowser,
@@ -125,5 +128,4 @@ export type {
   VideoSenderStats,
   ReconnectContext,
   ReconnectPolicy,
-  TrackType,
 };

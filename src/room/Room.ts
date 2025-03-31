@@ -67,6 +67,7 @@ import LocalParticipant from './participant/LocalParticipant';
 import type Participant from './participant/Participant';
 import type { ConnectionQuality } from './participant/Participant';
 import RemoteParticipant from './participant/RemoteParticipant';
+import { MAX_PAYLOAD_BYTES, RpcError, type RpcInvocationData, byteLength } from './rpc';
 import CriticalTimers from './timers';
 import LocalAudioTrack from './track/LocalAudioTrack';
 import type LocalTrack from './track/LocalTrack';
@@ -206,6 +207,8 @@ class Room extends (EventEmitter as new () => TypedEmitter<RoomEventCallbacks>) 
 
   private textStreamHandlers = new Map<string, TextStreamHandler>();
 
+  private rpcHandlers: Map<string, (data: RpcInvocationData) => Promise<string>> = new Map();
+
   /**
    * Creates a new Room, the primary construct for a LiveKit session.
    * @param options
@@ -237,7 +240,13 @@ class Room extends (EventEmitter as new () => TypedEmitter<RoomEventCallbacks>) 
 
     this.disconnectLock = new Mutex();
 
-    this.localParticipant = new LocalParticipant('', '', this.engine, this.options);
+    this.localParticipant = new LocalParticipant(
+      '',
+      '',
+      this.engine,
+      this.options,
+      this.rpcHandlers,
+    );
 
     if (this.options.videoCaptureDefaults.deviceId) {
       this.localParticipant.activeDeviceMap.set(
@@ -278,26 +287,132 @@ class Room extends (EventEmitter as new () => TypedEmitter<RoomEventCallbacks>) 
     }
   }
 
-  setTextStreamHandler(callback: TextStreamHandler, topic: string = '') {
+  registerTextStreamHandler(topic: string, callback: TextStreamHandler) {
     if (this.textStreamHandlers.has(topic)) {
       throw new TypeError(`A text stream handler for topic "${topic}" has already been set.`);
     }
     this.textStreamHandlers.set(topic, callback);
   }
 
-  removeTextStreamHandler(topic: string = '') {
+  unregisterTextStreamHandler(topic: string) {
     this.textStreamHandlers.delete(topic);
   }
 
-  setByteStreamHandler(callback: ByteStreamHandler, topic: string = '') {
+  registerByteStreamHandler(topic: string, callback: ByteStreamHandler) {
     if (this.byteStreamHandlers.has(topic)) {
       throw new TypeError(`A byte stream handler for topic "${topic}" has already been set.`);
     }
     this.byteStreamHandlers.set(topic, callback);
   }
 
-  removeByteStreamHandler(topic: string = '') {
+  unregisterByteStreamHandler(topic: string) {
     this.byteStreamHandlers.delete(topic);
+  }
+
+  /**
+   * Establishes the participant as a receiver for calls of the specified RPC method.
+   *
+   * @param method - The name of the indicated RPC method
+   * @param handler - Will be invoked when an RPC request for this method is received
+   * @returns A promise that resolves when the method is successfully registered
+   * @throws {Error} If a handler for this method is already registered (must call unregisterRpcMethod first)
+   *
+   * @example
+   * ```typescript
+   * room.localParticipant?.registerRpcMethod(
+   *   'greet',
+   *   async (data: RpcInvocationData) => {
+   *     console.log(`Received greeting from ${data.callerIdentity}: ${data.payload}`);
+   *     return `Hello, ${data.callerIdentity}!`;
+   *   }
+   * );
+   * ```
+   *
+   * The handler should return a Promise that resolves to a string.
+   * If unable to respond within `responseTimeout`, the request will result in an error on the caller's side.
+   *
+   * You may throw errors of type `RpcError` with a string `message` in the handler,
+   * and they will be received on the caller's side with the message intact.
+   * Other errors thrown in your handler will not be transmitted as-is, and will instead arrive to the caller as `1500` ("Application Error").
+   */
+  registerRpcMethod(method: string, handler: (data: RpcInvocationData) => Promise<string>) {
+    if (this.rpcHandlers.has(method)) {
+      throw Error(
+        `RPC handler already registered for method ${method}, unregisterRpcMethod before trying to register again`,
+      );
+    }
+    this.rpcHandlers.set(method, handler);
+  }
+
+  /**
+   * Unregisters a previously registered RPC method.
+   *
+   * @param method - The name of the RPC method to unregister
+   */
+  unregisterRpcMethod(method: string) {
+    this.rpcHandlers.delete(method);
+  }
+
+  private async handleIncomingRpcRequest(
+    callerIdentity: string,
+    requestId: string,
+    method: string,
+    payload: string,
+    responseTimeout: number,
+    version: number,
+  ) {
+    await this.engine.publishRpcAck(callerIdentity, requestId);
+
+    if (version !== 1) {
+      await this.engine.publishRpcResponse(
+        callerIdentity,
+        requestId,
+        null,
+        RpcError.builtIn('UNSUPPORTED_VERSION'),
+      );
+      return;
+    }
+
+    const handler = this.rpcHandlers.get(method);
+
+    if (!handler) {
+      await this.engine.publishRpcResponse(
+        callerIdentity,
+        requestId,
+        null,
+        RpcError.builtIn('UNSUPPORTED_METHOD'),
+      );
+      return;
+    }
+
+    let responseError: RpcError | null = null;
+    let responsePayload: string | null = null;
+
+    try {
+      const response = await handler({
+        requestId,
+        callerIdentity,
+        payload,
+        responseTimeout,
+      });
+      if (byteLength(response) > MAX_PAYLOAD_BYTES) {
+        responseError = RpcError.builtIn('RESPONSE_PAYLOAD_TOO_LARGE');
+        console.warn(`RPC Response payload too large for ${method}`);
+      } else {
+        responsePayload = response;
+      }
+    } catch (error) {
+      if (error instanceof RpcError) {
+        responseError = error;
+      } else {
+        console.warn(
+          `Uncaught error returned by RPC handler for ${method}. Returning APPLICATION_ERROR instead.`,
+          error,
+        );
+        responseError = RpcError.builtIn('APPLICATION_ERROR');
+      }
+    }
+    await this.engine.publishRpcResponse(callerIdentity, requestId, responsePayload, responseError);
   }
 
   /**
@@ -1306,6 +1421,10 @@ class Room extends (EventEmitter as new () => TypedEmitter<RoomEventCallbacks>) 
       this.log.warn('skipping incoming track after Room disconnected', this.logContext);
       return;
     }
+    if (mediaTrack.readyState === 'ended') {
+      this.log.info('skipping incoming track as it already ended', this.logContext);
+      return;
+    }
     const parts = unpackStreamId(stream.id);
     const participantSid = parts[0];
     let streamId = parts[1];
@@ -1339,6 +1458,7 @@ class Room extends (EventEmitter as new () => TypedEmitter<RoomEventCallbacks>) 
         adaptiveStreamSettings = {};
       }
     }
+
     participant.addSubscribedMediaTrack(
       mediaTrack,
       trackId,
@@ -1647,6 +1767,16 @@ class Room extends (EventEmitter as new () => TypedEmitter<RoomEventCallbacks>) 
       this.handleStreamChunk(packet.value.value);
     } else if (packet.value.case === 'streamTrailer') {
       this.handleStreamTrailer(packet.value.value);
+    } else if (packet.value.case === 'rpcRequest') {
+      const rpc = packet.value.value;
+      this.handleIncomingRpcRequest(
+        packet.participantIdentity,
+        rpc.id,
+        rpc.method,
+        rpc.payload,
+        rpc.responseTimeoutMs,
+        rpc.version,
+      );
     }
   };
 
@@ -1741,14 +1871,13 @@ class Room extends (EventEmitter as new () => TypedEmitter<RoomEventCallbacks>) 
 
   private handleStreamTrailer(trailer: DataStream_Trailer) {
     const textBuffer = this.textStreamControllers.get(trailer.streamId);
-
     if (textBuffer) {
       textBuffer.info.attributes = {
         ...textBuffer.info.attributes,
         ...trailer.attributes,
       };
       textBuffer.controller.close();
-      this.byteStreamControllers.delete(trailer.streamId);
+      this.textStreamControllers.delete(trailer.streamId);
     }
 
     const fileBuffer = this.byteStreamControllers.get(trailer.streamId);
@@ -2042,9 +2171,6 @@ class Room extends (EventEmitter as new () => TypedEmitter<RoomEventCallbacks>) 
           this.emit(RoomEvent.TrackUnsubscribed, track, publication, participant);
         },
       )
-      .on(ParticipantEvent.TrackSubscriptionFailed, (sid: string) => {
-        this.emit(RoomEvent.TrackSubscriptionFailed, sid, participant);
-      })
       .on(ParticipantEvent.TrackMuted, (pub: TrackPublication) => {
         this.emitWhenConnected(RoomEvent.TrackMuted, pub, participant);
       })
@@ -2447,7 +2573,7 @@ class Room extends (EventEmitter as new () => TypedEmitter<RoomEventCallbacks>) 
     ...args: Parameters<RoomEventCallbacks[E]>
   ): boolean {
     // active speaker updates are too spammy
-    if (event !== RoomEvent.ActiveSpeakersChanged) {
+    if (event !== RoomEvent.ActiveSpeakersChanged && event !== RoomEvent.TranscriptionReceived) {
       // only extract logContext from arguments in order to avoid logging the whole object tree
       const minimizedArgs = mapArgs(args).filter((arg: unknown) => arg !== undefined);
       this.log.debug(`room event ${event}`, { ...this.logContext, event, args: minimizedArgs });
